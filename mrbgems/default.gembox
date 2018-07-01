@@ -76,4 +76,8 @@ MRuby::GemBox.new do |conf|
 
   # Use mruby-compiler to build other mrbgems
   conf.gem :core => "mruby-compiler"
+
+  # Generate rmirb command
+  conf.gem :core => "mruby-bin-rmirb"
+
 end
