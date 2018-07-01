@@ -1,5 +1,6 @@
 /*
 ** mirb - Embeddable Interactive Ruby Shell
+**  >> remote-mrib(rmirb)
 **
 ** This program takes code from the user in
 ** an interactive way and executes it
@@ -47,6 +48,15 @@
 #include <mruby/proc.h>
 #include <mruby/compile.h>
 #include <mruby/string.h>
+
+//remote mirb
+int rmirb_init_network(void);
+char* rmirb_send_reset();
+char* rmirb_send_irep(mrb_state *mrb, struct RProc *proc);
+void rmirb_make_irep_msg(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg);
+void rmirb_recur(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg);
+void rmirb_parse_irep(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg);
+
 
 #ifdef ENABLE_READLINE
 
@@ -387,6 +397,8 @@ main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
+  rmirb_init_network();
+
   n = parse_args(mrb, argc, argv, &args);
   if (n == EXIT_FAILURE) {
     cleanup(mrb, &args);
@@ -541,9 +553,10 @@ done:
           break;
         }
 
-        if (args.verbose) {
-          mrb_codedump_all(mrb, proc);
-        }
+        //if (args.verbose) {
+        mrb_codedump_all(mrb, proc);
+        //}
+        rmirb_send_irep(mrb, proc);
         /* pass a proc for evaluation */
         /* evaluate the bytecode */
         result = mrb_vm_run(mrb,
@@ -581,4 +594,86 @@ done:
   mrb_close(mrb);
 
   return 0;
+}
+
+//remote mirb
+
+int rmirb_init_network(void){
+	int r=0;
+	printf("rmirb: connect the M5Stack\n");
+	printf("rmirb: IP: Port:\n");
+	if(r==0){
+		return 0;
+	}
+	rmirb_send_reset();
+	return 1;
+}
+
+char* rmirb_send_reset(){
+	return NULL;
+}
+char* rmirb_send_irep(mrb_state *mrb, struct RProc *proc){
+	int size;
+	unsigned char* msg;
+
+	printf("%s:\n",__func__);
+	size=0;
+	msg=NULL;
+	rmirb_make_irep_msg(mrb,proc->body.irep,&size,&msg);
+	
+	return NULL;
+}
+
+void rmirb_make_irep_msg(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg){
+	rmirb_recur(mrb, irep, size, msg);
+}
+
+void rmirb_recur(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg){
+	size_t i;
+	
+	rmirb_parse_irep(mrb, irep, size, msg);
+	for (i=0; i<irep->rlen; i++) {
+		rmirb_recur(mrb, irep->reps[i], size, msg);
+	}
+}
+
+extern char const*
+mrb_debug_get_filename(mrb_irep *irep, uint32_t pc);
+extern int32_t
+mrb_debug_get_line(mrb_irep *irep, uint32_t pc);
+
+void rmirb_parse_irep(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg){
+	int i;
+	int ai;
+	mrb_code c;
+	const char *file = NULL, *next_file;
+	int32_t line;
+	
+	if (!irep) return;
+	printf("irep %p nregs=%d nlocals=%d pools=%d syms=%d reps=%d\n", (void*)irep,
+		   irep->nregs, irep->nlocals, (int)irep->plen, (int)irep->slen, (int)irep->rlen);
+	
+	for (i = 0; i < (int)irep->ilen; i++) {
+		ai = mrb_gc_arena_save(mrb);
+		
+		next_file = mrb_debug_get_filename(irep, i);
+		if (next_file && file != next_file) {
+			printf("file: %s\n", next_file);
+			file = next_file;
+		}
+		line = mrb_debug_get_line(irep, i);
+		if (line < 0) {
+			printf("      ");
+		}
+		else {
+			printf("%5d ", line);
+		}
+		
+		printf("%03d ", i);
+		c = irep->iseq[i];
+		mrb_gc_arena_restore(mrb, ai);
+		printf("\n");
+	}
+	printf("\n");
+	
 }
