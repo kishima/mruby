@@ -6,6 +6,7 @@
 ** an interactive way and executes it
 ** immediately. It's a REPL...
 */
+#define ENABLE_READLINE
 
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,16 @@
 #include <mruby/string.h>
 
 //remote mirb
+#include <mruby/dump.h>
+#include <mruby/string.h>
+#include <mruby/irep.h>
+#include <mruby/numeric.h>
+#include <mruby/debug.h>
+#include <mruby/opcode.h>
+
+#define FLAG_BYTEORDER_NATIVE 2
+#define FLAG_BYTEORDER_NONATIVE 0
+
 int rmirb_init_network(void);
 char* rmirb_send_reset();
 char* rmirb_send_irep(mrb_state *mrb, struct RProc *proc);
@@ -626,6 +637,21 @@ char* rmirb_send_irep(mrb_state *mrb, struct RProc *proc){
 
 void rmirb_make_irep_msg(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg){
 	rmirb_recur(mrb, irep, size, msg);
+	
+	uint8_t *bin = NULL;
+	size_t bin_size = 0;
+	uint8_t flags=0;
+	int result;
+	result = mrb_dump_irep(mrb, irep, flags, &bin, &bin_size);
+	if (result == MRB_DUMP_OK) {
+		int i=0;
+		for(i=0;i<bin_size;i++){
+			printf("%02x ",bin[i]);
+		}
+		printf("\n");
+	}
+	free(bin);	
+	
 }
 
 void rmirb_recur(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg){
@@ -636,11 +662,6 @@ void rmirb_recur(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg)
 		rmirb_recur(mrb, irep->reps[i], size, msg);
 	}
 }
-
-extern char const*
-mrb_debug_get_filename(mrb_irep *irep, uint32_t pc);
-extern int32_t
-mrb_debug_get_line(mrb_irep *irep, uint32_t pc);
 
 void rmirb_parse_irep(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg){
 	int i;
@@ -654,25 +675,8 @@ void rmirb_parse_irep(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char**
 		   irep->nregs, irep->nlocals, (int)irep->plen, (int)irep->slen, (int)irep->rlen);
 	
 	for (i = 0; i < (int)irep->ilen; i++) {
-		ai = mrb_gc_arena_save(mrb);
-		
-		next_file = mrb_debug_get_filename(irep, i);
-		if (next_file && file != next_file) {
-			printf("file: %s\n", next_file);
-			file = next_file;
-		}
-		line = mrb_debug_get_line(irep, i);
-		if (line < 0) {
-			printf("      ");
-		}
-		else {
-			printf("%5d ", line);
-		}
-		
-		printf("%03d ", i);
 		c = irep->iseq[i];
-		mrb_gc_arena_restore(mrb, ai);
-		printf("\n");
+		printf("%02X ", GET_OPCODE(c));
 	}
 	printf("\n");
 	
