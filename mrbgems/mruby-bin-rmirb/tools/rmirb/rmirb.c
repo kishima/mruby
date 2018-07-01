@@ -58,6 +58,12 @@
 #include <mruby/debug.h>
 #include <mruby/opcode.h>
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <errno.h>
+
 #define FLAG_BYTEORDER_NATIVE 2
 #define FLAG_BYTEORDER_NONATIVE 0
 
@@ -68,6 +74,9 @@ void rmirb_make_irep_msg(mrb_state *mrb, mrb_irep *irep, int* size, unsigned cha
 void rmirb_recur(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg);
 void rmirb_parse_irep(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg);
 
+int rmirb_socket;
+
+//----
 
 #ifdef ENABLE_READLINE
 
@@ -408,7 +417,7 @@ main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
-  rmirb_init_network();
+  if(!rmirb_init_network()) return 1;
 
   n = parse_args(mrb, argc, argv, &args);
   if (n == EXIT_FAILURE) {
@@ -567,7 +576,10 @@ done:
         //if (args.verbose) {
         mrb_codedump_all(mrb, proc);
         //}
-        rmirb_send_irep(mrb, proc);
+        char* rret = rmirb_send_irep(mrb, proc);
+        if(rret==NULL){ rmirb_init_network();
+          rmirb_send_irep(mrb, proc);
+        }
         /* pass a proc for evaluation */
         /* evaluate the bytecode */
         result = mrb_vm_run(mrb,
@@ -610,12 +622,34 @@ done:
 //remote mirb
 
 int rmirb_init_network(void){
-	int r=0;
 	printf("rmirb: connect the M5Stack\n");
-	printf("rmirb: IP: Port:\n");
-	if(r==0){
+	
+	const char* server_ip = "127.0.0.1";
+	int port = 33333;
+	printf("rmirb: IP:%s Port:%d\n",server_ip,port);
+
+	struct sockaddr_in server;
+	char buf[32];
+	int n;
+	
+	rmirb_socket = socket(AF_INET, SOCK_STREAM, 0);
+	if(rmirb_socket<0){
+		printf("socket error: %s\n",strerror(errno));
 		return 0;
 	}
+	
+	server.sin_family = AF_INET;
+	server.sin_port = htons(port);
+	server.sin_addr.s_addr = inet_addr(server_ip);
+	
+	int res = connect(rmirb_socket, (struct sockaddr *)&server, sizeof(server));
+	
+	if(res<0){
+		printf("connect error: %s\n",strerror(errno));
+		return 0;
+	}
+	printf("");
+	
 	rmirb_send_reset();
 	return 1;
 }
@@ -623,20 +657,44 @@ int rmirb_init_network(void){
 char* rmirb_send_reset(){
 	return NULL;
 }
-char* rmirb_send_irep(mrb_state *mrb, struct RProc *proc){
-	int size;
-	unsigned char* msg;
 
+static char recv_buff[1000];
+
+char* rmirb_send_irep(mrb_state *mrb, struct RProc *proc){
 	printf("%s:\n",__func__);
-	size=0;
-	msg=NULL;
+
+	//create a message
+	int size=0;
+	unsigned char* msg =NULL;
 	rmirb_make_irep_msg(mrb,proc->body.irep,&size,&msg);
-	
-	return NULL;
+	if(size==0){
+		return recv_buff;
+	}
+	//send a message
+	//header
+	//type: 2bytes
+	//message size: 2 bytes
+	unsigned char buff[4];
+	buff[0]=0xFF;
+	buff[1]=1;//1:irep 2:reset 3:exit
+	uint16_to_bin(size,&buff[2]);
+	int res = send(rmirb_socket,buff,4,MSG_NOSIGNAL);
+	if(res<0){
+		printf("socket error!\n");
+		return NULL;
+	}
+	//irep body
+	res = send(rmirb_socket,msg,size,MSG_NOSIGNAL);
+	if(res<0){
+		printf("socket error!\n");
+		return NULL;
+	}
+	free(msg);
+	return recv_buff;
 }
 
 void rmirb_make_irep_msg(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg){
-	rmirb_recur(mrb, irep, size, msg);
+	//rmirb_recur(mrb, irep, size, msg);
 	
 	uint8_t *bin = NULL;
 	size_t bin_size = 0;
@@ -649,9 +707,13 @@ void rmirb_make_irep_msg(mrb_state *mrb, mrb_irep *irep, int* size, unsigned cha
 			printf("%02x ",bin[i]);
 		}
 		printf("\n");
+		*size = bin_size;
+		*msg = bin; 
+	}else{
+		printf("irep dump error!\n");
+		*size = 0;
 	}
-	free(bin);	
-	
+	//if(bin!=NULL)free(bin);
 }
 
 void rmirb_recur(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg){
