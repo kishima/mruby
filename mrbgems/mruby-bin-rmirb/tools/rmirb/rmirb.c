@@ -67,12 +67,12 @@
 #define FLAG_BYTEORDER_NATIVE 2
 #define FLAG_BYTEORDER_NONATIVE 0
 
-int rmirb_init_network(void);
+struct _args;
+
+int rmirb_init_network(struct _args*);
 char* rmirb_send_reset();
 char* rmirb_send_irep(mrb_state *mrb, struct RProc *proc);
 void rmirb_make_irep_msg(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg);
-void rmirb_recur(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg);
-void rmirb_parse_irep(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg);
 
 int rmirb_socket;
 
@@ -241,6 +241,7 @@ struct _args {
   mrb_bool verbose      : 1;
   int argc;
   char** argv;
+  char destip[4*4+1];
 };
 
 static void
@@ -277,6 +278,9 @@ parse_args(mrb_state *mrb, int argc, char **argv, struct _args *args)
     case 'v':
       if (!args->verbose) mrb_show_version(mrb);
       args->verbose = TRUE;
+      break;
+    case 'I':
+      strcpy(args->destip,(*argv)+2);
       break;
     case '-':
       if (strcmp((*argv) + 2, "version") == 0) {
@@ -417,14 +421,14 @@ main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
-  if(!rmirb_init_network()) return 1;
-
   n = parse_args(mrb, argc, argv, &args);
   if (n == EXIT_FAILURE) {
     cleanup(mrb, &args);
     usage(argv[0]);
     return n;
   }
+
+  if(!rmirb_init_network(&args)) return 1;
 
   ARGV = mrb_ary_new_capa(mrb, args.argc);
   for (i = 0; i < args.argc; i++) {
@@ -573,20 +577,24 @@ done:
           break;
         }
 
-        //if (args.verbose) {
-        mrb_codedump_all(mrb, proc);
-        //}
+        if (args.verbose) {
+          mrb_codedump_all(mrb, proc);
+        }
         char* rret = rmirb_send_irep(mrb, proc);
-        if(rret==NULL){ rmirb_init_network();
+        if(rret==NULL){ 
+          printf("retry to connect");;
+          rmirb_init_network(&args);
           rmirb_send_irep(mrb, proc);
         }
         /* pass a proc for evaluation */
         /* evaluate the bytecode */
+        /*
         result = mrb_vm_run(mrb,
             proc,
             mrb_top_self(mrb),
             stack_keep);
         stack_keep = proc->body.irep->nlocals;
+        */
         /* did an exception occur? */
         if (mrb->exc) {
           p(mrb, mrb_obj_value(mrb->exc), 0);
@@ -597,7 +605,7 @@ done:
           if (!mrb_respond_to(mrb, result, mrb_intern_lit(mrb, "inspect"))){
             result = mrb_any_to_s(mrb, result);
           }
-          p(mrb, result, 1);
+          //p(mrb, result, 1);
         }
       }
       ruby_code[0] = '\0';
@@ -621,10 +629,10 @@ done:
 
 //remote mirb
 
-int rmirb_init_network(void){
+int rmirb_init_network(struct _args* args){
 	printf("rmirb: connect the M5Stack\n");
 	
-	const char* server_ip = "127.0.0.1";
+	const char* server_ip = args->destip;
 	int port = 33333;
 	printf("rmirb: IP:%s Port:%d\n",server_ip,port);
 
@@ -648,7 +656,6 @@ int rmirb_init_network(void){
 		printf("connect error: %s\n",strerror(errno));
 		return 0;
 	}
-	printf("");
 	
 	rmirb_send_reset();
 	return 1;
@@ -661,8 +668,6 @@ char* rmirb_send_reset(){
 static char recv_buff[1000];
 
 char* rmirb_send_irep(mrb_state *mrb, struct RProc *proc){
-	printf("%s:\n",__func__);
-
 	//create a message
 	int size=0;
 	unsigned char* msg =NULL;
@@ -671,13 +676,14 @@ char* rmirb_send_irep(mrb_state *mrb, struct RProc *proc){
 		return recv_buff;
 	}
 	//send a message
-	//header
-	//type: 2bytes
-	//message size: 2 bytes
+	// header
+	//  type: 2bytes
+	//  message size: 2 bytes
 	unsigned char buff[4];
 	buff[0]=0xFF;
 	buff[1]=1;//1:irep 2:reset 3:exit
 	uint16_to_bin(size,&buff[2]);
+	//printf("%s:size=%d\n",__func__,size);
 	int res = send(rmirb_socket,buff,4,MSG_NOSIGNAL);
 	if(res<0){
 		printf("socket error!\n");
@@ -694,8 +700,6 @@ char* rmirb_send_irep(mrb_state *mrb, struct RProc *proc){
 }
 
 void rmirb_make_irep_msg(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg){
-	//rmirb_recur(mrb, irep, size, msg);
-	
 	uint8_t *bin = NULL;
 	size_t bin_size = 0;
 	uint8_t flags=0;
@@ -703,43 +707,16 @@ void rmirb_make_irep_msg(mrb_state *mrb, mrb_irep *irep, int* size, unsigned cha
 	result = mrb_dump_irep(mrb, irep, flags, &bin, &bin_size);
 	if (result == MRB_DUMP_OK) {
 		int i=0;
+		/*
 		for(i=0;i<bin_size;i++){
 			printf("%02x ",bin[i]);
 		}
 		printf("\n");
+		*/
 		*size = bin_size;
 		*msg = bin; 
 	}else{
 		printf("irep dump error!\n");
 		*size = 0;
 	}
-	//if(bin!=NULL)free(bin);
-}
-
-void rmirb_recur(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg){
-	size_t i;
-	
-	rmirb_parse_irep(mrb, irep, size, msg);
-	for (i=0; i<irep->rlen; i++) {
-		rmirb_recur(mrb, irep->reps[i], size, msg);
-	}
-}
-
-void rmirb_parse_irep(mrb_state *mrb, mrb_irep *irep, int* size, unsigned char** msg){
-	int i;
-	int ai;
-	mrb_code c;
-	const char *file = NULL, *next_file;
-	int32_t line;
-	
-	if (!irep) return;
-	printf("irep %p nregs=%d nlocals=%d pools=%d syms=%d reps=%d\n", (void*)irep,
-		   irep->nregs, irep->nlocals, (int)irep->plen, (int)irep->slen, (int)irep->rlen);
-	
-	for (i = 0; i < (int)irep->ilen; i++) {
-		c = irep->iseq[i];
-		printf("%02X ", GET_OPCODE(c));
-	}
-	printf("\n");
-	
 }
