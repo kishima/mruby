@@ -6,8 +6,6 @@
 ** an interactive way and executes it
 ** immediately. It's a REPL...
 */
-#define ENABLE_READLINE
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -59,10 +57,17 @@
 #include <mruby/opcode.h>
 
 #include <sys/types.h>
+
+#ifndef _WIN32
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#else
+#include <WinSock2.h>
+#define MSG_NOSIGNAL 0
+#pragma comment(lib, "ws2_32.lib")
+#endif
 
 #define FLAG_BYTEORDER_NATIVE 2
 #define FLAG_BYTEORDER_NONATIVE 0
@@ -602,9 +607,11 @@ done:
         }
         else {
           /* no */
+          /* FIXME rmirb is freeze when retrieve result.
           if (!mrb_respond_to(mrb, result, mrb_intern_lit(mrb, "inspect"))){
             result = mrb_any_to_s(mrb, result);
           }
+          */
           //p(mrb, result, 1);
         }
       }
@@ -627,11 +634,25 @@ done:
   return 0;
 }
 
+#ifdef _WIN32
+void printLastError() {
+  char *s = NULL;
+  FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                NULL, WSAGetLastError(),
+                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                (LPWSTR)&s, 0, NULL);
+  printf("socket error: %s\n", s);
+  LocalFree(s);
+}
+#endif
+
 //remote mirb
 
 int rmirb_init_network(struct _args* args){
-	printf("rmirb: connect the M5Stack\n");
-	
+#ifdef _WIN32
+  WSADATA wsaData;
+  WSAStartup(MAKEWORD(2, 0), &wsaData);
+#endif
 	const char* server_ip = args->destip;
 	int port = 33333;
 	printf("rmirb: IP:%s Port:%d\n",server_ip,port);
@@ -641,10 +662,16 @@ int rmirb_init_network(struct _args* args){
 	int n;
 	
 	rmirb_socket = socket(AF_INET, SOCK_STREAM, 0);
+#ifdef _WIN32
+  if(rmirb_socket == INVALID_SOCKET) {
+    printLastError();
+  }
+#else
 	if(rmirb_socket<0){
-		printf("socket error: %s\n",strerror(errno));
+		printf("socket error: %s\n", strerror(errno));
 		return 0;
 	}
+#endif
 	
 	server.sin_family = AF_INET;
 	server.sin_port = htons(port);
@@ -670,7 +697,7 @@ static char recv_buff[1000];
 char* rmirb_send_irep(mrb_state *mrb, struct RProc *proc){
 	//create a message
 	int size=0;
-	unsigned char* msg =NULL;
+	unsigned char* msg = NULL;
 	rmirb_make_irep_msg(mrb,proc->body.irep,&size,&msg);
 	if(size==0){
 		return recv_buff;
@@ -683,17 +710,25 @@ char* rmirb_send_irep(mrb_state *mrb, struct RProc *proc){
 	buff[0]=0xFF;
 	buff[1]=1;//1:irep 2:reset 3:exit
 	uint16_to_bin(size,&buff[2]);
-	//printf("%s:size=%d\n",__func__,size);
-	int res = send(rmirb_socket,buff,4,MSG_NOSIGNAL);
+	int res = send(rmirb_socket, buff, 4, MSG_NOSIGNAL);
+  
 	if(res<0){
-		printf("socket error!\n");
+		printf("socket error! res=%d\n", res);
+  #ifndef _WIN32
 		return NULL;
+  #else
+    printLastError();
+  #endif
 	}
 	//irep body
-	res = send(rmirb_socket,msg,size,MSG_NOSIGNAL);
+	res = send(rmirb_socket, msg, size, MSG_NOSIGNAL);
 	if(res<0){
-		printf("socket error!\n");
+		printf("socket error! res=%d\n", res);
+  #ifndef _WIN32
 		return NULL;
+  #else
+    printLastError();
+  #endif
 	}
 	free(msg);
 	return recv_buff;
@@ -707,12 +742,12 @@ void rmirb_make_irep_msg(mrb_state *mrb, mrb_irep *irep, int* size, unsigned cha
 	result = mrb_dump_irep(mrb, irep, flags, &bin, &bin_size);
 	if (result == MRB_DUMP_OK) {
 		int i=0;
-		/*
+#ifdef DEBUG
 		for(i=0;i<bin_size;i++){
 			printf("%02x ",bin[i]);
 		}
 		printf("\n");
-		*/
+#endif
 		*size = bin_size;
 		*msg = bin; 
 	}else{
