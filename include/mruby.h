@@ -209,6 +209,9 @@ struct mrb_cache_entry {
 #endif
 
 struct mrb_jmpbuf;
+#ifdef MRB_SW_INTERRUPT
+typedef void (*mrb_interrupt_func)(struct mrb_state* mrb);
+#endif
 
 typedef void (*mrb_atexit_func)(struct mrb_state*);
 
@@ -284,6 +287,10 @@ typedef struct mrb_state {
 #endif
   uint16_t atexit_stack_len;
   uint16_t ecall_nest;                    /* prevent infinite recursive ecall() */
+#ifdef MRB_SW_INTERRUPT
+  mrb_interrupt_func interrupt_func;
+  uint16_t interrupt_flag;
+#endif
 } mrb_state;
 
 /**

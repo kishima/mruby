@@ -890,6 +890,23 @@ argnum_error(mrb_state *mrb, mrb_int num)
   mrb_exc_set(mrb, exc);
 }
 
+#ifdef MRB_SW_INTERRUPT
+static void exec_interrupt(mrb_state *mrb){
+  static uint8_t icount=0;
+  icount++;
+  //fprintf(stderr,"check count=%d\n",icount);
+  if( (mrb->interrupt_flag&0xF000==0x0000 && mrb->interrupt_flag&0x000F) || icount>=1000){
+    icount=0;
+    fprintf(stderr,">>interrupt!!!\n");
+    if(mrb->interrupt_func){
+      mrb->interrupt_flag |= 0x1000;
+      mrb->interrupt_func(mrb);
+      mrb->interrupt_flag &= 0x0FFF;
+    }
+  }
+}
+#endif
+
 #define ERR_PC_SET(mrb) mrb->c->ci->err = pc0;
 #define ERR_PC_CLR(mrb) mrb->c->ci->err = 0;
 #ifdef MRB_ENABLE_DEBUG_HOOK
@@ -921,7 +938,11 @@ argnum_error(mrb_state *mrb, mrb_int num)
 #else
 
 #define INIT_DISPATCH JUMP; return mrb_nil_value();
+#ifndef MRB_SW_INTERRUPT
 #define CASE(insn,ops) L_ ## insn: pc0=pc++; FETCH_ ## ops (); L_ ## insn ## _BODY:
+#else
+#define CASE(insn,ops) L_ ## insn: pc0=pc++; exec_interrupt(mrb); FETCH_ ## ops (); L_ ## insn ## _BODY:
+#endif
 #define NEXT insn=BYTECODE_DECODER(*pc); CODE_FETCH_HOOK(mrb, irep, pc, regs); goto *optable[insn]
 #define JUMP NEXT
 
