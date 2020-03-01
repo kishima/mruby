@@ -209,8 +209,14 @@ struct mrb_cache_entry {
 #endif
 
 struct mrb_jmpbuf;
+
+#ifndef MRB_SW_INTERRUPT
+#define MRB_SW_INTERRUPT
+#endif
+
 #ifdef MRB_SW_INTERRUPT
-typedef void (*mrb_interrupt_func)(struct mrb_state* mrb);
+typedef void (*mrb_interrupt_func)(struct mrb_state *mrb,int index);
+typedef void (*mrb_uer_mutex_func)(struct mrb_state *mrb,int state);
 #endif
 
 typedef void (*mrb_atexit_func)(struct mrb_state*);
@@ -289,6 +295,7 @@ typedef struct mrb_state {
   uint16_t ecall_nest;                    /* prevent infinite recursive ecall() */
 #ifdef MRB_SW_INTERRUPT
   mrb_interrupt_func interrupt_func;
+  mrb_uer_mutex_func user_mutex_func;
   uint16_t interrupt_flag;
 #endif
 } mrb_state;

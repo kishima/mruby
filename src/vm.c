@@ -892,16 +892,22 @@ argnum_error(mrb_state *mrb, mrb_int num)
 
 #ifdef MRB_SW_INTERRUPT
 static void exec_interrupt(mrb_state *mrb){
-  static uint8_t icount=0;
-  icount++;
-  //fprintf(stderr,"check count=%d\n",icount);
-  if( (mrb->interrupt_flag&0xF000==0x0000 && mrb->interrupt_flag&0x000F) || icount>=1000){
-    icount=0;
-    fprintf(stderr,">>interrupt!!!\n");
-    if(mrb->interrupt_func){
-      mrb->interrupt_flag |= 0x1000;
-      mrb->interrupt_func(mrb);
-      mrb->interrupt_flag &= 0x0FFF;
+  if(!mrb->interrupt_func)
+    return;
+  while( !(mrb->interrupt_flag & 0x8000) && mrb->interrupt_flag & 0x7FFF){
+    fprintf(stderr,">>interrupt! %04X\n",mrb->interrupt_flag);
+    for(int i=0;i<16;i++){
+      int bit = (mrb->interrupt_flag >> i) & 0x0001;
+      if(bit){
+        fprintf(stderr,">>invoke %d\n",i);
+        mrb->user_mutex_func(mrb,1);
+        uint16_t backup = mrb->interrupt_flag;
+        mrb->interrupt_flag |= 0x8000; //Interrupt flag
+        mrb->interrupt_func(mrb,i);
+        mrb->interrupt_flag = backup;
+        mrb->interrupt_flag &= ~(1 << i);
+        mrb->user_mutex_func(mrb,0);
+      }
     }
   }
 }
