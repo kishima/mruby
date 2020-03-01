@@ -895,11 +895,9 @@ static void exec_interrupt(mrb_state *mrb){
   if(!mrb->interrupt_func)
     return;
   while( !(mrb->interrupt_flag & 0x8000) && mrb->interrupt_flag & 0x7FFF){
-    fprintf(stderr,">>interrupt! %04X\n",mrb->interrupt_flag);
     for(int i=0;i<16;i++){
       int bit = (mrb->interrupt_flag >> i) & 0x0001;
       if(bit){
-        fprintf(stderr,">>invoke %d\n",i);
         mrb->user_mutex_func(mrb,1);
         uint16_t backup = mrb->interrupt_flag;
         mrb->interrupt_flag |= 0x8000; //Interrupt flag
