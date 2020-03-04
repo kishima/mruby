@@ -210,10 +210,6 @@ struct mrb_cache_entry {
 
 struct mrb_jmpbuf;
 
-#ifndef MRB_SW_INTERRUPT
-#define MRB_SW_INTERRUPT
-#endif
-
 #ifdef MRB_SW_INTERRUPT
 typedef void (*mrb_interrupt_func)(struct mrb_state *mrb,int index);
 typedef void (*mrb_uer_mutex_func)(struct mrb_state *mrb,int state);
