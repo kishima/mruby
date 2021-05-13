@@ -4,6 +4,10 @@
 #
 # ISO 15.2.12
 class Array
+  ##
+  # Array is enumerable
+  # ISO 15.2.12.3
+  include Enumerable
 
   ##
   # Calls the given block for each element of +self+
@@ -193,13 +197,6 @@ class Array
     return block.call if ret.nil? && block
     ret
   end
-end
-
-##
-# Array is enumerable
-class Array
-  # ISO 15.2.12.3
-  include Enumerable
 
   ##
   # Sort all elements and replace +self+ with these
